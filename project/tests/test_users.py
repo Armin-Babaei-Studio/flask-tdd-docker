@@ -1,13 +1,32 @@
 # project/tests/test_users.py
 
 import json
+from datetime import datetime
 
 import pytest
 
-from project.api.models import User
+import project.api.users
+
+def test_add_user(test_app, monkeypatch):
+    def mock_get_user_by_email(email):
+        return None
+    def mock_add_user(username, email):
+        return True
+    monkeypatch.setattr(project.api.users, "get_user_by_email", mock_get_user_by_email)
+    monkeypatch.setattr(project.api.users, "add_user", mock_add_user)
+
+    client = test_app.test_client()
+    resp = client.post(
+        "/users",
+        data=json.dumps({"username": "michael", "email": "michael@testdriven.io"}),
+        content_type="application/json",
+    )
+    data = json.loads(resp.data.decode())
+    assert resp.status_code == 201
+    assert "michael@testdriven.io was added!" in data["message"]
 
 
-def test_add_user_invalid_json(test_app, test_database):
+def test_add_user_invalid_json(test_app):
     client = test_app.test_client()
     resp = client.post("/users", data=json.dumps({}), content_type="application/json",)
     data = json.loads(resp.data.decode())
@@ -15,7 +34,7 @@ def test_add_user_invalid_json(test_app, test_database):
     assert "Input payload validation failed" in data["message"]
 
 
-def test_add_user_invalid_json_keys(test_app, test_database):
+def test_add_user_invalid_json_keys(test_app, monkeypatch):
     client = test_app.test_client()
     resp = client.post(
         "/users",
@@ -27,7 +46,13 @@ def test_add_user_invalid_json_keys(test_app, test_database):
     assert "Input payload validation failed" in data["message"]
 
 
-def test_add_user_duplicate_email(test_app, test_database):
+def test_add_user_duplicate_email(test_app, monkeypatch):
+    def mock_get_user_by_email(email):
+        return True
+    def mock_add_user(username, email):
+        return True
+    monkeypatch.setattr(project.api.users, "get_user_by_email", mock_get_user_by_email)
+    monkeypatch.setattr(project.api.users, "add_user", mock_add_user)
     client = test_app.test_client()
     client.post(
         "/users",
@@ -44,17 +69,27 @@ def test_add_user_duplicate_email(test_app, test_database):
     assert "Sorry. That email already exists." in data["message"]
 
 
-def test_single_user(test_app, test_database, add_user):
-    user = add_user("jeffrey", "jeffrey@testdriven.io")
+def test_single_user(test_app, monkeypatch):
+    def mock_get_user_by_id(user_id):
+        return {
+            "id": 1,
+            "username": "jeffrey",
+            "email": "jeffrey@testdriven.io",
+            "created_date": datetime.now()
+        }
+    monkeypatch.setattr(project.api.users, "get_user_by_id", mock_get_user_by_id)
     client = test_app.test_client()
-    resp = client.get(f"/users/{user.id}")
+    resp = client.get("/users/1")
     data = json.loads(resp.data.decode())
     assert resp.status_code == 200
     assert "jeffrey" in data["username"]
     assert "jeffrey@testdriven.io" in data["email"]
 
 
-def test_single_user_incorrect_id(test_app, test_database):
+def test_single_user_incorrect_id(test_app, monkeypatch):
+    def mock_get_user_by_id(user_id):
+        return None
+    monkeypatch.setattr(project.api.users, "get_user_by_id", mock_get_user_by_id)
     client = test_app.test_client()
     resp = client.get("/users/999")
     data = json.loads(resp.data.decode())
@@ -62,10 +97,23 @@ def test_single_user_incorrect_id(test_app, test_database):
     assert "User 999 does not exist" in data["message"]
 
 
-def test_all_users(test_app, test_database, add_user):
-    test_database.session.query(User).delete()
-    add_user("michael", "michael@mherman.org")
-    add_user("fletcher", "fletcher@notreal.com")
+def test_all_users(test_app, monkeypatch):
+    def mock_get_all_users():
+        return [
+            {
+                "id": 1,
+                "username": "michael",
+                "email": "michael@mherman.org",
+                "created_date": datetime.now()
+            },
+            {
+                "id": 1,
+                "username": "fletcher",
+                "email": "fletcher@notreal.com",
+                "created_date": datetime.now()
+            }
+        ]
+    monkeypatch.setattr(project.api.users, "get_all_users", mock_get_all_users)
     client = test_app.test_client()
     resp = client.get("/users")
     data = json.loads(resp.data.decode())
@@ -77,25 +125,34 @@ def test_all_users(test_app, test_database, add_user):
     assert "fletcher@notreal.com" in data[1]["email"]
 
 
-def test_remove_user(test_app, test_database, add_user):
-    test_database.session.query(User).delete()
-    user = add_user("user-to-be-removed", "remove-me@testdriven.io")
+def test_remove_user(test_app, monkeypatch):
+    class AttrDict(dict):
+        def __init__(self, *args, **kwargs):
+            super(AttrDict, self).__init__(*args, **kwargs)
+            self.__dict__ = self
+    def mock_get_user_by_id(user_id):
+        d = AttrDict()
+        d.update({
+            "id": 1,
+            "username": "user-to-be-removed",
+            "email": "remove-me@testdriven.io"
+        })
+        return d
+    def mock_delete_user(user):
+        return True
+    monkeypatch.setattr(project.api.users, "get_user_by_id", mock_get_user_by_id)
+    monkeypatch.setattr(project.api.users, "delete_user", mock_delete_user)
     client = test_app.test_client()
-    resp_one = client.get("/users")
-    data = json.loads(resp_one.data.decode())
-    assert resp_one.status_code == 200
-    assert len(data) == 1
-    resp_two = client.delete(f"/users/{user.id}")
+    resp_two = client.delete("/users/1")
     data = json.loads(resp_two.data.decode())
     assert resp_two.status_code == 200
     assert "remove-me@testdriven.io was removed!" in data["message"]
-    resp_three = client.get("/users")
-    data = json.loads(resp_three.data.decode())
-    assert resp_three.status_code == 200
-    assert len(data) == 0
 
 
-def test_remove_user_incorrect_id(test_app, test_database):
+def test_remove_user_incorrect_id(test_app, monkeypatch):
+    def mock_get_user_by_id(user_id):
+        return None
+    monkeypatch.setattr(project.api.users, "get_user_by_id", mock_get_user_by_id)
     client = test_app.test_client()
     resp = client.delete("/users/999")
     data = json.loads(resp.data.decode())
@@ -103,18 +160,33 @@ def test_remove_user_incorrect_id(test_app, test_database):
     assert "User 999 does not exist" in data["message"]
 
 
-def test_update_user(test_app, test_database, add_user):
-    user = add_user("user-to-be-updated", "update-me@testdriven.io")
+def test_update_user(test_app, monkeypatch):
+    class AttrDict(dict):
+        def __init__(self, *args, **kwargs):
+            super(AttrDict, self).__init__(*args, **kwargs)
+            self.__dict__ = self
+    def mock_get_user_by_id(user_id):
+        d = AttrDict()
+        d.update({
+            "id": 1,
+            "username": "me",
+            "email": "me@testdriven.io"
+        })
+        return d
+    def mock_update_user(user, username, email):
+        return True
+    monkeypatch.setattr(project.api.users, "get_user_by_id", mock_get_user_by_id)
+    monkeypatch.setattr(project.api.users, "update_user", mock_update_user)
     client = test_app.test_client()
     resp_one = client.put(
-        f"/users/{user.id}",
+        "/users/1",
         data=json.dumps({"username": "me", "email": "me@testdriven.io"}),
         content_type="application/json",
     )
     data = json.loads(resp_one.data.decode())
     assert resp_one.status_code == 200
-    assert f"{user.id} was updated!" in data["message"]
-    resp_two = client.get(f"/users/{user.id}")
+    assert "1 was updated!" in data["message"]
+    resp_two = client.get("/users/1")
     data = json.loads(resp_two.data.decode())
     assert resp_two.status_code == 200
     assert "me" in data["username"]
@@ -134,9 +206,10 @@ def test_update_user(test_app, test_database, add_user):
         ],
     ],
 )
-def test_update_user_invalid(
-    test_app, test_database, user_id, payload, status_code, message
-):
+def test_update_user_invalid(test_app, monkeypatch, user_id, payload, status_code, message):
+    def mock_get_user_by_id(user_id):
+        return None
+    monkeypatch.setattr(project.api.users, "get_user_by_id", mock_get_user_by_id)
     client = test_app.test_client()
     resp = client.put(
         f"/users/{user_id}", data=json.dumps(payload), content_type="application/json",
