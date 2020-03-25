@@ -1,12 +1,7 @@
 # project/tests/test_users_unit.py
 
 
-import json
-from datetime import datetime
-
 import pytest
-
-import project.api.users
 
 
 def test_add_user(test_app, monkeypatch):
@@ -62,5 +57,7 @@ def test_update_user(test_app, monkeypatch):
         ],
     ],
 )
-def test_update_user_invalid(test_app, monkeypatch, user_id, payload, status_code, message):
+def test_update_user_invalid(
+    test_app, monkeypatch, user_id, payload, status_code, message
+):
     pass
